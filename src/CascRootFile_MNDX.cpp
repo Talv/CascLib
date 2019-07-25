@@ -12,6 +12,7 @@
 #define __CASCLIB_SELF__
 #include "CascLib.h"
 #include "CascCommon.h"
+#include <unordered_map>
 
 //-----------------------------------------------------------------------------
 // Local defines
@@ -2825,13 +2826,15 @@ struct TMndxHandler
         TMndxSearch Search;
         char szFileName[MAX_PATH];
         bool bFindResult = false;
-        DWORD dwErrCode;
+        int nError;
+        TMndxMarFile * pMarFullFile = MndxInfo.MarFiles[MAR_FULL_NAMES];
+        std::unordered_map<ULONGLONG, PCASC_CKEY_ENTRY> fileNameHashCKeyMap;
 
         // Setup the search mask
         Search.SetSearchMask("", 0);
 
         // Keep searching ad long as we found something
-        while ((dwErrCode = pMarFile->DoSearch(&Search, &bFindResult)) == ERROR_SUCCESS && bFindResult)
+        while ((nError = pMarFile->DoSearch(&Search, &bFindResult)) == ERROR_SUCCESS && bFindResult)
         {
             // Sanity check
             assert(Search.cchFoundPath < MAX_PATH);
@@ -2861,8 +2864,7 @@ struct TMndxHandler
                             // Merge the package name and file name
                             MakeFileName(szFileName, _countof(szFileName), pPackage, &Search);
 
-                            // Insert the entry to the file tree
-                            FileTree.InsertByName(pCKeyEntry, szFileName);
+                            fileNameHashCKeyMap[CalcFileNameHash(szFileName)] = pCKeyEntry;
                         }
                     }
 
@@ -2874,7 +2876,26 @@ struct TMndxHandler
             }
         }
 
-        return dwErrCode;
+        // Reset the search mask
+        Search.SetSearchMask("", 0);
+
+        // Search the MAR_FULL_NAMES and use it to build the FileTree respecting original case sensitivity
+        while ((nError = pMarFullFile->DoSearch(&Search, &bFindResult)) == ERROR_SUCCESS && bFindResult)
+        {
+            // Sanity check
+            assert(Search.cchFoundPath < MAX_PATH);
+
+            // Fill the file name
+            memcpy(szFileName, Search.szFoundPath, Search.cchFoundPath);
+            szFileName[Search.cchFoundPath] = 0;
+
+            pCKeyEntry = fileNameHashCKeyMap.at(CalcFileNameHash(szFileName));
+            
+            // Insert the entry to the file tree
+            FileTree.InsertByName(pCKeyEntry, szFileName);
+        }
+
+        return nError;
     }
 
     //
